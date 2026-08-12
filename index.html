@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>GPX Route Comparer</title>
+    <link
+      rel="stylesheet"
+      href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+      integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
+      crossorigin=""
+    />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <header>
+      <h1>GPX Route Comparer</h1>
+      <p>Compare two rides from the same manually selected starting line.</p>
+    </header>
+
+    <main>
+      <section class="panel controls">
+        <div class="file-row">
+          <div class="file-picker-row">
+            <span class="route-label"><span class="route-dot route-a"></span>Route A</span>
+            <div class="file-picker">
+              <input id="fileA" class="file-input-hidden" type="file" accept=".gpx,application/gpx+xml" multiple />
+              <button type="button" class="file-trigger" data-target="fileA">Choose files</button>
+              <span id="fileNameA" class="file-name">No files selected</span>
+              <div id="fileListA" class="file-list" aria-live="polite"></div>
+            </div>
+          </div>
+          <div class="file-picker-row">
+            <span class="route-label"><span class="route-dot route-b"></span>Route B</span>
+            <div class="file-picker">
+              <input id="fileB" class="file-input-hidden" type="file" accept=".gpx,application/gpx+xml" multiple />
+              <button type="button" class="file-trigger" data-target="fileB">Choose files</button>
+              <span id="fileNameB" class="file-name">No files selected</span>
+              <div id="fileListB" class="file-list" aria-live="polite"></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="actions">
+          <button id="drawLineBtn">Set starting line</button>
+          <button id="clearBtn">Clear</button>
+        </div>
+
+        <div class="playback-row">
+          <button id="playPauseBtn" disabled>Play</button>
+          <fieldset id="speedGroup" disabled>
+            <legend>Speed</legend>
+            <label><input type="radio" name="speed" value="1" checked />1x</label>
+            <label><input type="radio" name="speed" value="2" />2x</label>
+            <label><input type="radio" name="speed" value="4" />4x</label>
+            <label><input type="radio" name="speed" value="8" />8x</label>
+            <label><input type="radio" name="speed" value="16" />16x</label>
+          </fieldset>
+          <label class="scrub-label">
+            <span id="timelineTitle">Timeline · 00:00</span>
+            <input id="timeline" type="range" min="0" max="0" step="1" value="0" disabled />
+          </label>
+          <div id="statsRow" class="stats-row" aria-live="polite"></div>
+        </div>
+        <p id="errorMessage" class="error-message" role="alert" hidden></p>
+
+      </section>
+
+      <section class="panel map-panel">
+        <div id="map" aria-label="Map for route comparison"></div>
+        <div class="map-footer" aria-hidden="true">
+          <a class="source-link" href="https://github.com/ZeroOne3010/gpx-comparer" target="_blank" rel="noopener noreferrer">View source on GitHub</a>
+        </div>
+      </section>
+    </main>
+
+    <script
+      src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+      integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
+      crossorigin=""
+    ></script>
+    <script src="app.js"></script>
+  </body>
+</html>

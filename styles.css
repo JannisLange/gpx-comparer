@@ -1,0 +1,296 @@
+:root {
+  --bg: #f7fff5;
+  --panel: #ffffff;
+  --ink: #153223;
+  --accent: #75ff35;
+  --accent-dark: #44cc0f;
+  --muted: #5f7b6e;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+  background: radial-gradient(circle at top right, #e9ffe0 0%, var(--bg) 50%);
+  color: var(--ink);
+}
+
+header {
+  padding: 1rem 1.25rem 0.5rem;
+}
+
+header h1 {
+  margin: 0;
+}
+
+header p {
+  margin-top: 0.35rem;
+  color: var(--muted);
+}
+
+main {
+  display: grid;
+  grid-template-columns: 360px 1fr;
+  gap: 1rem;
+  padding: 0 1rem 1rem;
+}
+
+.panel {
+  background: var(--panel);
+  border: 1px solid #dbf5cd;
+  border-radius: 12px;
+  box-shadow: 0 5px 16px rgb(24 87 12 / 8%);
+}
+
+.controls {
+  padding: 1rem;
+}
+
+.file-row,
+.playback-row {
+  display: grid;
+  gap: 0.8rem;
+}
+
+.file-row {
+  grid-template-columns: 1fr;
+}
+
+label {
+  display: grid;
+  gap: 0.4rem;
+  font-weight: 600;
+}
+
+button {
+  font: inherit;
+  border-radius: 8px;
+}
+
+fieldset {
+  border: 1px solid #cbe8bf;
+  padding: 0.45rem;
+  background: #f7fff5;
+}
+
+.actions {
+  display: flex;
+  gap: 0.6rem;
+  margin: 0.9rem 0;
+}
+
+button {
+  border: 1px solid #91df6f;
+  background: linear-gradient(to bottom, #c4ffa6, var(--accent));
+  color: #153223;
+  padding: 0.5rem 0.9rem;
+  cursor: pointer;
+  font-weight: 700;
+}
+
+button:hover:not(:disabled) {
+  background: linear-gradient(to bottom, #a8ff80, var(--accent-dark));
+}
+
+button:disabled,
+fieldset:disabled,
+input:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.scrub-label {
+  grid-column: 1 / -1;
+}
+
+#timelineTitle {
+  display: inline-block;
+  margin-bottom: 0.2rem;
+}
+
+#timeline {
+  width: 100%;
+  accent-color: #45cf0f;
+}
+
+.error-message {
+  margin: 0.8rem 0 0;
+  padding: 0.55rem 0.65rem;
+  border: 1px solid #ef9a9a;
+  border-radius: 8px;
+  background: #fff1f1;
+  color: #8f1d1d;
+  font-size: 0.92rem;
+  font-weight: 600;
+}
+.route-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+}
+
+.route-dot {
+  width: 0.8rem;
+  height: 0.8rem;
+  border-radius: 999px;
+  border: 1px solid #11182766;
+}
+
+.route-a { background: #2563eb; }
+.route-b { background: #a21caf; }
+
+.file-name {
+  color: var(--muted);
+  font-weight: 500;
+  font-size: 0.9rem;
+}
+
+#speedGroup {
+  display: flex;
+  gap: 0.6rem;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+#speedGroup legend {
+  font-weight: 600;
+  margin-right: 0.4rem;
+}
+
+#speedGroup label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.2rem;
+  font-weight: 600;
+}
+
+.stats-row {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  font-size: 0.8rem;
+  color: #1e3a2b;
+}
+
+.route-stats {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  border: 1px solid #d9eed1;
+  border-radius: 999px;
+  padding: 0.2rem 0.45rem;
+  background: #fbfff9;
+  white-space: nowrap;
+}
+
+.route-stats .route-dot {
+  width: 0.62rem;
+  height: 0.62rem;
+}
+
+#map {
+  width: 100%;
+  min-height: 72vh;
+  border-radius: 12px;
+}
+
+@media (max-width: 960px) {
+  main {
+    grid-template-columns: 1fr;
+  }
+
+  #map {
+    min-height: 60vh;
+  }
+}
+
+
+.file-picker-row {
+  display: grid;
+  gap: 0.35rem;
+}
+
+.file-picker {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.55rem;
+  flex-wrap: wrap;
+}
+
+.file-input-hidden {
+  display: none;
+}
+
+.file-trigger {
+  padding: 0.42rem 0.7rem;
+  font-weight: 600;
+}
+
+
+.map-panel {
+  position: relative;
+}
+
+.map-footer {
+  height: 0;
+  position: relative;
+}
+
+.source-link {
+  position: absolute;
+  right: 0.7rem;
+  top: 0.25rem;
+  font-size: 0.72rem;
+  color: #6f8a7f;
+  text-decoration: none;
+  opacity: 0.85;
+}
+
+.source-link:hover,
+.source-link:focus-visible {
+  text-decoration: underline;
+  opacity: 1;
+}
+
+
+.file-list {
+  display: grid;
+  gap: 0.35rem;
+  min-height: 0.2rem;
+}
+
+.file-list-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.4rem;
+  border: 1px solid #d9eed1;
+  border-radius: 8px;
+  padding: 0.3rem 0.45rem;
+  background: #fbfff9;
+}
+
+.file-list-name {
+  color: #365748;
+  font-size: 0.84rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.swap-button {
+  border: 1px solid #b7ddb0;
+  background: #ebfce4;
+  color: #24563b;
+  font-weight: 700;
+  padding: 0.1rem 0.42rem;
+  border-radius: 999px;
+  line-height: 1.1;
+}
+
+.swap-button:hover:not(:disabled) {
+  background: #d9f8cf;
+}
