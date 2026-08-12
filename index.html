@@ -41,21 +41,23 @@
           </div>
         </div>
 
-        <div class="actions">
-          <button id="drawLineBtn">Set starting line</button>
-          <button id="clearBtn">Clear</button>
+        <div class="primary-control-stack">
+          <div class="actions">
+            <button id="drawLineBtn">Set starting line</button>
+            <button id="clearBtn">Clear</button>
+          </div>
+          <button id="playPauseBtn" disabled>Play</button>
+          <div id="speedGroup" class="speed-control" aria-label="Playback speed">
+            <span class="speed-label">Speed</span>
+            <div class="speed-stepper">
+              <button id="speedDownBtn" type="button" class="speed-step-button" aria-label="Decrease playback speed" disabled>−</button>
+              <output id="speedValue" class="speed-value" aria-live="polite">1x</output>
+              <button id="speedUpBtn" type="button" class="speed-step-button" aria-label="Increase playback speed" disabled>+</button>
+            </div>
+          </div>
         </div>
 
         <div class="playback-row">
-          <button id="playPauseBtn" disabled>Play</button>
-          <fieldset id="speedGroup" disabled>
-            <legend>Speed</legend>
-            <label><input type="radio" name="speed" value="1" checked />1x</label>
-            <label><input type="radio" name="speed" value="2" />2x</label>
-            <label><input type="radio" name="speed" value="4" />4x</label>
-            <label><input type="radio" name="speed" value="8" />8x</label>
-            <label><input type="radio" name="speed" value="16" />16x</label>
-          </fieldset>
           <label class="scrub-label">
             <span id="timelineTitle">Timeline · 00:00</span>
             <input id="timeline" type="range" min="0" max="0" step="1" value="0" disabled />
@@ -73,6 +75,71 @@
         </div>
       </section>
     </main>
+
+    <section class="panel archive-panel" aria-labelledby="archiveTitle">
+      <div class="archive-heading">
+        <div>
+          <h2 id="archiveTitle">Trip archive</h2>
+          <p>Save GPX rides permanently and load previous trips into either comparison route.</p>
+        </div>
+        <button id="refreshArchiveBtn" type="button" class="secondary-button">Refresh</button>
+      </div>
+
+      <form id="archiveForm" class="archive-form">
+        <label>
+          <span>GPX file</span>
+          <input id="archiveFile" type="file" accept=".gpx,application/gpx+xml,application/xml,text/xml" required />
+        </label>
+        <label>
+          <span>Direction</span>
+          <select id="tripDirection">
+            <option value="work_to_home">Work → Home</option>
+            <option value="home_to_work">Home → Work</option>
+            <option value="other">Other</option>
+          </select>
+        </label>
+        <label>
+          <span>Route</span>
+          <input id="routeName" type="text" maxlength="100" placeholder="e.g. Canal route" />
+        </label>
+        <label>
+          <span>Bike setup</span>
+          <input id="bikeSetup" type="text" maxlength="100" placeholder="e.g. Gravel tires" />
+        </label>
+        <label class="archive-notes">
+          <span>Notes</span>
+          <input id="tripNotes" type="text" maxlength="1000" placeholder="Optional conditions or observations" />
+        </label>
+        <button id="saveTripBtn" type="submit">Save trip</button>
+      </form>
+
+      <p id="archiveStatus" class="archive-status" aria-live="polite">Checking archive configuration…</p>
+      <div class="leaderboard-wrap">
+        <table class="leaderboard">
+          <thead>
+            <tr>
+              <th>Date</th>
+              <th>Direction</th>
+              <th>Distance</th>
+              <th>Elapsed</th>
+              <th>Moving</th>
+              <th>Stopped</th>
+              <th>Avg.</th>
+              <th>Bike setup</th>
+              <th>Compare</th>
+            </tr>
+          </thead>
+          <tbody id="leaderboardBody">
+            <tr><td colspan="9" class="empty-table">No saved trips loaded.</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <footer id="speedLegend" class="speed-legend" aria-label="Route segment speed legend" hidden>
+      <span class="speed-legend-title">Route segment speed</span>
+      <div id="speedLegendItems" class="speed-legend-items"></div>
+    </footer>
 
     <script
       src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"

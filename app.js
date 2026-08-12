@@ -12,7 +12,11 @@ const ui = {
   clearBtn: document.getElementById('clearBtn'),
   playPauseBtn: document.getElementById('playPauseBtn'),
   speedGroup: document.getElementById('speedGroup'),
-  speedRadios: [...document.querySelectorAll('input[name="speed"]')],
+  speedDownBtn: document.getElementById('speedDownBtn'),
+  speedUpBtn: document.getElementById('speedUpBtn'),
+  speedValue: document.getElementById('speedValue'),
+  speedLegend: document.getElementById('speedLegend'),
+  speedLegendItems: document.getElementById('speedLegendItems'),
   timeline: document.getElementById('timeline'),
   timelineTitle: document.getElementById('timelineTitle'),
   statsRow: document.getElementById('statsRow'),
@@ -21,6 +25,16 @@ const ui = {
   fileListA: document.getElementById('fileListA'),
   fileListB: document.getElementById('fileListB'),
   errorMessage: document.getElementById('errorMessage'),
+  archiveForm: document.getElementById('archiveForm'),
+  archiveFile: document.getElementById('archiveFile'),
+  tripDirection: document.getElementById('tripDirection'),
+  routeName: document.getElementById('routeName'),
+  bikeSetup: document.getElementById('bikeSetup'),
+  tripNotes: document.getElementById('tripNotes'),
+  saveTripBtn: document.getElementById('saveTripBtn'),
+  refreshArchiveBtn: document.getElementById('refreshArchiveBtn'),
+  archiveStatus: document.getElementById('archiveStatus'),
+  leaderboardBody: document.getElementById('leaderboardBody'),
   fileTriggers: [...document.querySelectorAll('.file-trigger')]
 };
 
@@ -28,10 +42,14 @@ const routeStyles = [
   {name: 'Route A', color: '#2563eb'},
   {name: 'Route B', color: '#a21caf'}
 ];
+const playbackSpeeds = [1, 2, 4, 8, 16];
+const speedTierColors = ['#dc2626', '#f97316', '#eab308', '#84cc16', '#16a34a'];
 
 const state = {
   routes: routeStylesTemplate(),
   startLine: null,
+  rawPointLayer: L.layerGroup().addTo(map),
+  intersectionLayer: L.layerGroup().addTo(map),
   drawMode: false,
   drawPoints: [],
   isPlaying: false,
@@ -39,8 +57,11 @@ const state = {
   maxSec: 0,
   rafId: null,
   lastFrameTs: null,
+  playbackSpeedIndex: 0,
   speedBuckets: null,
-  hasUserInteractedMap: false
+  hasUserInteractedMap: false,
+  archiveConfigured: false,
+  archivedTrips: []
 };
 
 ui.fileA.addEventListener('change', () => handleFileLoad(0, [...(ui.fileA.files ?? [])]));
@@ -54,13 +75,19 @@ ui.fileTriggers.forEach((trigger) => {
 ui.drawLineBtn.addEventListener('click', toggleDrawMode);
 ui.clearBtn.addEventListener('click', clearAll);
 ui.playPauseBtn.addEventListener('click', togglePlayback);
+ui.speedDownBtn.addEventListener('click', () => changePlaybackSpeed(-1));
+ui.speedUpBtn.addEventListener('click', () => changePlaybackSpeed(1));
 ui.timeline.addEventListener('input', () => {
   state.currentSec = Number(ui.timeline.value);
   renderAtTime(state.currentSec);
 });
+ui.archiveForm.addEventListener('submit', saveTripToArchive);
+ui.refreshArchiveBtn.addEventListener('click', loadTripArchive);
+ui.leaderboardBody.addEventListener('click', onLeaderboardClick);
 map.on('click', onMapClick);
 registerMapInteractionTracking();
 initializeMapCenterFromUserLocation();
+loadTripArchive();
 
 
 
@@ -106,11 +133,15 @@ function clearAll() {
     state.startLine = null;
   }
 
+  state.rawPointLayer.clearLayers();
+  state.intersectionLayer.clearLayers();
+
   state.drawMode = false;
   state.drawPoints = [];
   state.currentSec = 0;
   state.maxSec = 0;
   state.speedBuckets = null;
+  state.playbackSpeedIndex = 0;
   ui.fileA.value = '';
   ui.fileB.value = '';
   ui.fileNameA.textContent = 'No files selected';
@@ -121,7 +152,8 @@ function clearAll() {
   ui.timeline.disabled = true;
   ui.timelineTitle.textContent = 'Timeline · 00:00';
   ui.statsRow.innerHTML = '';
-  ui.speedGroup.disabled = true;
+  updateSpeedControl(false);
+  renderSpeedLegend();
   ui.playPauseBtn.disabled = true;
   ui.playPauseBtn.textContent = 'Play';
   ui.drawLineBtn.textContent = 'Set starting line';
@@ -210,6 +242,7 @@ function renderFileListForRoute(routeIdx) {
 }
 
 function clearAllSampleSyncState() {
+  state.intersectionLayer.clearLayers();
   for (const route of state.routes) {
     for (const sample of route.samples) {
       sample.syncStartIdx = null;
@@ -270,41 +303,100 @@ function drawRouteSample(route, sample) {
 
 function drawSpeedSegments(sample) {
   if (!state.speedBuckets) return;
-  const {lowMax, midMax} = state.speedBuckets;
   for (let i = 1; i < sample.points.length; i += 1) {
     const p0 = sample.points[i - 1];
     const p1 = sample.points[i];
     const dtSec = Number.isFinite(p1.time) && Number.isFinite(p0.time) ? (p1.time - p0.time) / 1000 : NaN;
     const speed = dtSec > 0 ? haversineM(p0, p1) / dtSec : NaN;
     if (!Number.isFinite(speed)) continue;
-    const color = speed <= lowMax ? '#dc2626' : speed <= midMax ? '#eab308' : '#16a34a';
+    const tierIdx = state.speedBuckets.findIndex((max) => speed <= max);
+    const color = speedTierColors[tierIdx === -1 ? speedTierColors.length - 1 : tierIdx];
     L.polyline([[p0.lat, p0.lon], [p1.lat, p1.lon]], {color, weight: 5, opacity: 0.85}).addTo(sample.layerGroup);
   }
 }
 
-function toggleDrawMode() { state.drawMode = !state.drawMode; state.drawPoints = []; if (state.drawMode) stopPlayback(); ui.drawLineBtn.textContent = state.drawMode ? 'Click 2 points on map…' : 'Set starting line'; }
-function onMapClick(e) { if (!state.drawMode) return; state.drawPoints.push(e.latlng); if (state.drawPoints.length < 2) return; stopPlayback(); if (state.startLine) state.startLine.remove(); state.startLine = L.polyline(state.drawPoints.map((p) => [p.lat, p.lng]), {color: '#111827', dashArray: '8,6', weight: 4}).addTo(map); state.drawMode = false; state.drawPoints = []; ui.drawLineBtn.textContent = 'Set starting line'; attemptSyncAndPreparePlayback(); }
+function toggleDrawMode() {
+  state.drawMode = !state.drawMode;
+  state.drawPoints = [];
+  state.intersectionLayer.clearLayers();
+  if (state.drawMode) {
+    stopPlayback();
+    showRawGpsPoints();
+  } else {
+    state.rawPointLayer.clearLayers();
+    attemptSyncAndPreparePlayback();
+  }
+  ui.drawLineBtn.textContent = state.drawMode ? 'Click 2 points on map…' : 'Set starting line';
+}
+
+function showRawGpsPoints() {
+  state.rawPointLayer.clearLayers();
+  for (const route of state.routes) {
+    for (const sample of route.samples) {
+      for (const point of sample.points) {
+        L.circleMarker([point.lat, point.lon], {
+          radius: 2.5,
+          stroke: true,
+          color: '#ffffff',
+          weight: 1,
+          fillColor: route.color,
+          fillOpacity: 0.9,
+          interactive: false
+        }).addTo(state.rawPointLayer);
+      }
+    }
+  }
+}
+
+function onMapClick(e) {
+  if (!state.drawMode) return;
+  state.drawPoints.push(e.latlng);
+  if (state.drawPoints.length < 2) return;
+  stopPlayback();
+  if (state.startLine) state.startLine.remove();
+  state.startLine = L.polyline(state.drawPoints.map((p) => [p.lat, p.lng]), {color: '#111827', dashArray: '8,6', weight: 4}).addTo(map);
+  state.drawMode = false;
+  state.drawPoints = [];
+  state.rawPointLayer.clearLayers();
+  ui.drawLineBtn.textContent = 'Set starting line';
+  attemptSyncAndPreparePlayback();
+}
 
 function attemptSyncAndPreparePlayback() {
+  state.intersectionLayer.clearLayers();
   if (!state.startLine) return;
   if (state.routes.some((route) => route.samples.length === 0)) return;
   const [l0, l1] = state.startLine.getLatLngs();
+  const crossings = [];
   for (const route of state.routes) {
     for (const sample of route.samples) {
-      sample.syncStartIdx = findCrossingIndex(sample.points, l0, l1);
-      if (sample.syncStartIdx === -1) {
+      const crossing = findFirstCrossing(sample.points, l0, l1);
+      if (!crossing) {
+        clearAllSampleSyncState();
         resetPlaybackState();
         return;
       }
-      sample.syncTimeline = buildSyncedTimeline(sample.points, sample.syncStartIdx);
+      crossings.push({route, sample, crossing});
     }
+  }
+  for (const {route, sample, crossing} of crossings) {
+    sample.syncStartIdx = crossing.segmentEndIndex;
+    sample.syncTimeline = buildSyncedTimeline(sample.points, crossing);
+    L.circleMarker([crossing.point.lat, crossing.point.lon], {
+      radius: 6,
+      color: '#ffffff',
+      weight: 2,
+      fillColor: route.color,
+      fillOpacity: 1,
+      interactive: false
+    }).addTo(state.intersectionLayer);
   }
   state.maxSec = Math.ceil(Math.max(...state.routes.flatMap((route) => route.samples.map((sample) => sample.syncTimeline.at(-1).tSec))));
   state.currentSec = 0;
   ui.timeline.max = String(state.maxSec);
   ui.timeline.value = '0';
   ui.timeline.disabled = false;
-  ui.speedGroup.disabled = false;
+  updateSpeedControl(true);
   ui.playPauseBtn.disabled = false;
   renderAtTime(0);
 }
@@ -316,16 +408,55 @@ function resetPlaybackState() {
   ui.timeline.value = '0'; ui.timeline.max = '0'; ui.timeline.disabled = true;
   ui.timelineTitle.textContent = 'Timeline · 00:00';
   ui.statsRow.innerHTML = '';
-  ui.speedGroup.disabled = true;
+  updateSpeedControl(false);
   ui.playPauseBtn.disabled = true;
 }
 
-const findCrossingIndex = (points, a, b) => { for (let i = 1; i < points.length; i += 1) if (segmentsIntersect(points[i - 1], points[i], a, b)) return i; return -1; };
-function buildSyncedTimeline(points, startIdx) { const timeline = [{tSec: 0, point: points[startIdx]}]; let elapsed = 0; for (let i = startIdx + 1; i < points.length; i += 1) { const prev = points[i - 1]; const curr = points[i]; const dtSec = Number.isFinite(prev.time) && Number.isFinite(curr.time) && curr.time > prev.time ? (curr.time - prev.time) / 1000 : haversineM(prev, curr) / 4; elapsed += dtSec; timeline.push({tSec: elapsed, point: curr}); } return timeline; }
+function findFirstCrossing(points, a, b) {
+  for (let i = 1; i < points.length; i += 1) {
+    const crossing = segmentIntersection(points[i - 1], points[i], a, b);
+    if (crossing) return {...crossing, segmentEndIndex: i};
+  }
+  return null;
+}
+
+function buildSyncedTimeline(points, crossing) {
+  const {segmentEndIndex, routeRatio, point} = crossing;
+  const timeline = [{tSec: 0, point}];
+  const segmentStart = points[segmentEndIndex - 1];
+  const segmentEnd = points[segmentEndIndex];
+  const fullSegmentSec = pointDurationSec(segmentStart, segmentEnd);
+  let elapsed = fullSegmentSec * (1 - routeRatio);
+  if (elapsed > 0) timeline.push({tSec: elapsed, point: segmentEnd});
+  for (let i = segmentEndIndex + 1; i < points.length; i += 1) {
+    elapsed += pointDurationSec(points[i - 1], points[i]);
+    timeline.push({tSec: elapsed, point: points[i]});
+  }
+  return timeline;
+}
+
+function pointDurationSec(start, end) {
+  return Number.isFinite(start.time) && Number.isFinite(end.time) && end.time > start.time
+    ? (end.time - start.time) / 1000
+    : haversineM(start, end) / 4;
+}
 function togglePlayback() { if (!state.isPlaying) { state.isPlaying = true; ui.playPauseBtn.textContent = 'Pause'; state.lastFrameTs = null; state.rafId = requestAnimationFrame(tick); } else stopPlayback(); }
 function stopPlayback() { state.isPlaying = false; ui.playPauseBtn.textContent = 'Play'; if (state.rafId) cancelAnimationFrame(state.rafId); state.rafId = null; state.lastFrameTs = null; }
 function tick(ts) { if (!state.isPlaying) return; if (!state.lastFrameTs) state.lastFrameTs = ts; const dt = (ts - state.lastFrameTs) / 1000; state.lastFrameTs = ts; state.currentSec += dt * getPlaybackSpeed(); if (state.currentSec >= state.maxSec) { state.currentSec = state.maxSec; stopPlayback(); } ui.timeline.value = String(Math.floor(state.currentSec)); renderAtTime(state.currentSec); state.rafId = requestAnimationFrame(tick); }
-const getPlaybackSpeed = () => Number(ui.speedRadios.find((radio) => radio.checked)?.value ?? 1);
+function changePlaybackSpeed(direction) {
+  state.playbackSpeedIndex = Math.max(0, Math.min(playbackSpeeds.length - 1, state.playbackSpeedIndex + direction));
+  updateSpeedControl(!ui.playPauseBtn.disabled);
+}
+
+function updateSpeedControl(playbackEnabled) {
+  const speed = playbackSpeeds[state.playbackSpeedIndex];
+  ui.speedValue.value = `${speed}x`;
+  ui.speedValue.textContent = `${speed}x`;
+  ui.speedDownBtn.disabled = !playbackEnabled || state.playbackSpeedIndex === 0;
+  ui.speedUpBtn.disabled = !playbackEnabled || state.playbackSpeedIndex === playbackSpeeds.length - 1;
+}
+
+const getPlaybackSpeed = () => playbackSpeeds[state.playbackSpeedIndex];
 
 function renderAtTime(tSec) {
   const routeStats = [];
@@ -354,8 +485,218 @@ function renderStats(routeStats) { if (!routeStats.length) return (ui.statsRow.i
 function interpolatePoint(timeline, tSec) { if (tSec <= 0) return timeline[0].point; if (tSec >= timeline.at(-1).tSec) return timeline.at(-1).point; let i = 1; while (i < timeline.length && timeline[i].tSec < tSec) i += 1; const p0 = timeline[i - 1]; const p1 = timeline[i]; const span = p1.tSec - p0.tSec || 1; const ratio = (tSec - p0.tSec) / span; return {lat: p0.point.lat + (p1.point.lat - p0.point.lat) * ratio, lon: p0.point.lon + (p1.point.lon - p0.point.lon) * ratio}; }
 const formatTime = (sec) => `${String(Math.floor(Math.max(0, sec) / 60)).padStart(2, '0')}:${String(Math.max(0, Math.floor(sec)) % 60).padStart(2, '0')}`;
 function fitRoutes() { const bounds = []; for (const route of state.routes) for (const sample of route.samples) sample.points.forEach((p) => bounds.push([p.lat, p.lon])); if (bounds.length) map.fitBounds(bounds, {padding: [30, 30]}); }
-function recalculateSpeedDomain() { const speeds = []; for (const route of state.routes) for (const sample of route.samples) for (let i = 1; i < sample.points.length; i += 1) { const p0 = sample.points[i - 1]; const p1 = sample.points[i]; const dtSec = Number.isFinite(p1.time) && Number.isFinite(p0.time) ? (p1.time - p0.time) / 1000 : NaN; const speed = dtSec > 0 ? haversineM(p0, p1) / dtSec : NaN; if (Number.isFinite(speed)) speeds.push(speed); } if (!speeds.length) return (state.speedBuckets = null); speeds.sort((a, b) => a - b); const q = (f) => speeds[Math.min(speeds.length - 1, Math.max(0, Math.floor((speeds.length - 1) * f)))]; state.speedBuckets = {lowMax: q(1 / 3), midMax: q(2 / 3)}; }
+function recalculateSpeedDomain() {
+  const speeds = [];
+  for (const route of state.routes) for (const sample of route.samples) for (let i = 1; i < sample.points.length; i += 1) {
+    const p0 = sample.points[i - 1];
+    const p1 = sample.points[i];
+    const dtSec = Number.isFinite(p1.time) && Number.isFinite(p0.time) ? (p1.time - p0.time) / 1000 : NaN;
+    const speed = dtSec > 0 ? haversineM(p0, p1) / dtSec : NaN;
+    if (Number.isFinite(speed)) speeds.push(speed);
+  }
+  if (!speeds.length) {
+    state.speedBuckets = null;
+    renderSpeedLegend();
+    return;
+  }
+  speeds.sort((a, b) => a - b);
+  const q = (fraction) => speeds[Math.min(speeds.length - 1, Math.max(0, Math.floor((speeds.length - 1) * fraction)))];
+  state.speedBuckets = [q(0.2), q(0.4), q(0.6), q(0.8)];
+  renderSpeedLegend();
+}
+
+function renderSpeedLegend() {
+  if (!state.speedBuckets) {
+    ui.speedLegend.hidden = true;
+    ui.speedLegendItems.innerHTML = '';
+    return;
+  }
+  const thresholds = state.speedBuckets.map((speed) => speed * 3.6);
+  const labels = thresholds.map((speed, idx) => idx === 0
+    ? `≤ ${speed.toFixed(1)} km/h`
+    : `${thresholds[idx - 1].toFixed(1)}–${speed.toFixed(1)} km/h`);
+  labels.push(`> ${thresholds.at(-1).toFixed(1)} km/h`);
+  ui.speedLegendItems.innerHTML = labels.map((label, idx) => `<span class="speed-legend-item"><span class="speed-swatch" style="background:${speedTierColors[idx]}"></span>${label}</span>`).join('');
+  ui.speedLegend.hidden = false;
+}
+
+async function loadTripArchive() {
+  setArchiveStatus('Loading saved trips…');
+  ui.refreshArchiveBtn.disabled = true;
+  try {
+    const statusResponse = await fetch('/api/archive-status');
+    if (!statusResponse.ok) throw new Error('The archive API is unavailable. Run the app with `npm run dev` for local API support.');
+    const status = await statusResponse.json();
+    state.archiveConfigured = Boolean(status.configured);
+    setArchiveFormEnabled(state.archiveConfigured);
+    if (!state.archiveConfigured) {
+      state.archivedTrips = [];
+      renderLeaderboard();
+      setArchiveStatus('Trip storage is not configured yet. Add the Supabase environment variables in Vercel.', 'error');
+      return;
+    }
+
+    const response = await fetch('/api/trips');
+    const payload = await readApiResponse(response);
+    state.archivedTrips = payload.trips || [];
+    renderLeaderboard();
+    setArchiveStatus(`${state.archivedTrips.length} saved trip${state.archivedTrips.length === 1 ? '' : 's'}.`);
+  } catch (error) {
+    state.archiveConfigured = false;
+    setArchiveFormEnabled(false);
+    setArchiveStatus(error.message, 'error');
+  } finally {
+    ui.refreshArchiveBtn.disabled = false;
+  }
+}
+
+async function saveTripToArchive(event) {
+  event.preventDefault();
+  const file = ui.archiveFile.files?.[0];
+  if (!file) return setArchiveStatus('Choose a GPX file first.', 'error');
+  ui.saveTripBtn.disabled = true;
+  setArchiveStatus(`Saving ${file.name}…`);
+  try {
+    const response = await fetch('/api/trips', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/gpx+xml',
+        'X-GPX-Filename': encodeURIComponent(file.name),
+        'X-Trip-Direction': encodeURIComponent(ui.tripDirection.value),
+        'X-Route-Name': encodeURIComponent(ui.routeName.value),
+        'X-Bike-Setup': encodeURIComponent(ui.bikeSetup.value),
+        'X-Trip-Notes': encodeURIComponent(ui.tripNotes.value)
+      },
+      body: file
+    });
+    await readApiResponse(response);
+    ui.archiveForm.reset();
+    setArchiveStatus(`${file.name} was saved successfully.`, 'success');
+    await loadTripArchive();
+  } catch (error) {
+    setArchiveStatus(error.message, 'error');
+  } finally {
+    ui.saveTripBtn.disabled = !state.archiveConfigured;
+  }
+}
+
+function renderLeaderboard() {
+  if (!state.archivedTrips.length) {
+    ui.leaderboardBody.innerHTML = '<tr><td colspan="9" class="empty-table">No saved trips yet.</td></tr>';
+    return;
+  }
+  ui.leaderboardBody.innerHTML = state.archivedTrips.map((trip) => `
+    <tr>
+      <td title="${escapeHtml(trip.original_filename)}">${formatTripDate(trip.recorded_at)}</td>
+      <td>${formatDirection(trip.direction)}</td>
+      <td>${formatDistance(trip.distance_m)}</td>
+      <td>${formatDuration(trip.elapsed_time_s)}</td>
+      <td>${formatDuration(trip.moving_time_s)}</td>
+      <td>${formatDuration(trip.stopped_time_s)}</td>
+      <td>${(Number(trip.average_speed_mps) * 3.6).toFixed(1)} km/h</td>
+      <td>${escapeHtml(trip.bike_setup || '—')}</td>
+      <td><span class="compare-actions">
+        <button type="button" class="compare-button" data-trip-id="${trip.id}" data-route="0">Route A</button>
+        <button type="button" class="compare-button" data-trip-id="${trip.id}" data-route="1">Route B</button>
+      </span></td>
+    </tr>`).join('');
+}
+
+async function onLeaderboardClick(event) {
+  const button = event.target.closest('[data-trip-id]');
+  if (!button) return;
+  const trip = state.archivedTrips.find((item) => item.id === button.dataset.tripId);
+  if (!trip) return;
+  button.disabled = true;
+  setArchiveStatus(`Loading ${trip.original_filename} into Route ${button.dataset.route === '0' ? 'A' : 'B'}…`);
+  try {
+    const response = await fetch(`/api/trip-file?id=${encodeURIComponent(trip.id)}`);
+    if (!response.ok) await readApiResponse(response);
+    const blob = await response.blob();
+    const file = new File([blob], trip.original_filename, {type: 'application/gpx+xml'});
+    await handleFileLoad(Number(button.dataset.route), [file]);
+    setArchiveStatus(`${trip.original_filename} loaded into Route ${button.dataset.route === '0' ? 'A' : 'B'}.`, 'success');
+  } catch (error) {
+    setArchiveStatus(error.message, 'error');
+  } finally {
+    button.disabled = false;
+  }
+}
+
+function setArchiveFormEnabled(enabled) {
+  for (const element of ui.archiveForm.elements) element.disabled = !enabled;
+}
+
+function setArchiveStatus(message, type = '') {
+  ui.archiveStatus.textContent = message;
+  ui.archiveStatus.className = `archive-status${type ? ` is-${type}` : ''}`;
+}
+
+async function readApiResponse(response) {
+  let payload;
+  try {
+    payload = await response.json();
+  } catch {
+    payload = {};
+  }
+  if (!response.ok) throw new Error(payload.error || `Archive request failed (${response.status}).`);
+  return payload;
+}
+
+function formatTripDate(value) {
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? '—' : new Intl.DateTimeFormat(undefined, {dateStyle: 'medium', timeStyle: 'short'}).format(date);
+}
+
+function formatDirection(value) {
+  if (value === 'work_to_home') return 'Work → Home';
+  if (value === 'home_to_work') return 'Home → Work';
+  return 'Other';
+}
+
+function formatDistance(value) {
+  const meters = Number(value);
+  return meters >= 1000 ? `${(meters / 1000).toFixed(2)} km` : `${Math.round(meters)} m`;
+}
+
+function formatDuration(value) {
+  const seconds = Math.max(0, Math.round(Number(value) || 0));
+  const hours = Math.floor(seconds / 3600);
+  const minutes = Math.floor((seconds % 3600) / 60);
+  const remainder = seconds % 60;
+  return hours > 0
+    ? `${hours}:${String(minutes).padStart(2, '0')}:${String(remainder).padStart(2, '0')}`
+    : `${minutes}:${String(remainder).padStart(2, '0')}`;
+}
+
+function escapeHtml(value) {
+  return String(value).replace(/[&<>'"]/g, (character) => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;'}[character]));
+}
 function redrawAllRoutes() { for (const route of state.routes) for (const sample of route.samples) { sample.layerGroup?.remove(); sample.marker?.remove(); sample.layerGroup = L.layerGroup().addTo(map); sample.marker = null; drawRouteSample(route, sample); } }
-function segmentsIntersect(p1, q1, p2, q2) { const o1 = orientation(p1, q1, p2); const o2 = orientation(p1, q1, q2); const o3 = orientation(p2, q2, p1); const o4 = orientation(p2, q2, q1); return o1 !== o2 && o3 !== o4; }
-function orientation(p, q, r) { const val = (q.lon ?? q.lng) - (p.lon ?? p.lng); const cross = val * ((r.lat ?? r[0]) - (q.lat ?? q[0])) - ((q.lat ?? q[0]) - (p.lat ?? p[0])) * ((r.lon ?? r.lng ?? r[1]) - (q.lon ?? q.lng)); return cross > 0; }
+function segmentIntersection(routeStart, routeEnd, lineStart, lineEnd) {
+  const p = {x: routeStart.lon, y: routeStart.lat};
+  const r = {x: routeEnd.lon - routeStart.lon, y: routeEnd.lat - routeStart.lat};
+  const q = {x: lineStart.lng, y: lineStart.lat};
+  const s = {x: lineEnd.lng - lineStart.lng, y: lineEnd.lat - lineStart.lat};
+  const denominator = cross2d(r, s);
+  if (Math.abs(denominator) < 1e-15) return null;
+  const qMinusP = {x: q.x - p.x, y: q.y - p.y};
+  const routeRatio = cross2d(qMinusP, s) / denominator;
+  const lineRatio = cross2d(qMinusP, r) / denominator;
+  const epsilon = 1e-9;
+  if (routeRatio < -epsilon || routeRatio > 1 + epsilon || lineRatio < -epsilon || lineRatio > 1 + epsilon) return null;
+  const ratio = Math.max(0, Math.min(1, routeRatio));
+  return {
+    routeRatio: ratio,
+    point: {
+      lat: routeStart.lat + (routeEnd.lat - routeStart.lat) * ratio,
+      lon: routeStart.lon + (routeEnd.lon - routeStart.lon) * ratio,
+      ele: routeStart.ele + (routeEnd.ele - routeStart.ele) * ratio,
+      time: Number.isFinite(routeStart.time) && Number.isFinite(routeEnd.time)
+        ? routeStart.time + (routeEnd.time - routeStart.time) * ratio
+        : NaN
+    }
+  };
+}
+function cross2d(a, b) { return a.x * b.y - a.y * b.x; }
 function haversineM(a, b) { const R = 6371000; const toRad = (deg) => (deg * Math.PI) / 180; const dLat = toRad(b.lat - a.lat); const dLon = toRad(b.lon - a.lon); const lat1 = toRad(a.lat); const lat2 = toRad(b.lat); const x = Math.sin(dLat / 2) ** 2 + Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLon / 2) ** 2; return 2 * R * Math.asin(Math.sqrt(x)); }

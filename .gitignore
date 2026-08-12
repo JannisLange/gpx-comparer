@@ -1,3 +1,8 @@
 work/
 outputs/
-
+node_modules/
+.npm-cache/
+.vercel/
+.env
+.env.local
+.env.*.local
