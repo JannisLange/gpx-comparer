@@ -22,5 +22,16 @@ test('parses GPX track points and derives leaderboard metrics', () => {
 
 test('rejects tracks without enough timestamps', () => {
   const points = parseGpx('<gpx><trk><trkseg><trkpt lat="1" lon="1"/><trkpt lat="2" lon="2"/></trkseg></trk></gpx>');
-  assert.throws(() => calculateTripMetrics(points), /timestamped/);
+  assert.throws(() => calculateTripMetrics(points), /valid timestamp/);
+});
+
+test('rejects XML that is not GPX and out-of-range coordinates', () => {
+  assert.throws(() => parseGpx('<gpx><trk></gpx>'), /not valid GPX\/XML/);
+  assert.throws(() => parseGpx('<root><trkpt lat="1" lon="1"/></root>'), /not a GPX/);
+  assert.throws(() => parseGpx('<gpx><trk><trkseg><trkpt lat="91" lon="1"/><trkpt lat="2" lon="2"/></trkseg></trk></gpx>'), /latitude or longitude/);
+});
+
+test('rejects non-increasing timestamps', () => {
+  const points = parseGpx('<gpx><trk><trkseg><trkpt lat="1" lon="1"><time>2026-01-01T08:00:10Z</time></trkpt><trkpt lat="2" lon="2"><time>2026-01-01T08:00:00Z</time></trkpt></trkseg></trk></gpx>');
+  assert.throws(() => calculateTripMetrics(points), /must increase/);
 });

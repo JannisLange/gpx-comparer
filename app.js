@@ -27,6 +27,15 @@ const ui = {
   errorMessage: document.getElementById('errorMessage'),
   archiveForm: document.getElementById('archiveForm'),
   archiveFile: document.getElementById('archiveFile'),
+  archiveFileSummary: document.getElementById('archiveFileSummary'),
+  archiveSummaryName: document.getElementById('archiveSummaryName'),
+  archiveSummarySize: document.getElementById('archiveSummarySize'),
+  archiveSummaryDate: document.getElementById('archiveSummaryDate'),
+  archiveSummaryDuration: document.getElementById('archiveSummaryDuration'),
+  archiveSummaryDistance: document.getElementById('archiveSummaryDistance'),
+  archiveSummaryPoints: document.getElementById('archiveSummaryPoints'),
+  archiveSummaryDirection: document.getElementById('archiveSummaryDirection'),
+  archiveSummaryMessage: document.getElementById('archiveSummaryMessage'),
   tripDirection: document.getElementById('tripDirection'),
   routeName: document.getElementById('routeName'),
   bikeSetup: document.getElementById('bikeSetup'),
@@ -61,7 +70,9 @@ const state = {
   speedBuckets: null,
   hasUserInteractedMap: false,
   archiveConfigured: false,
-  archivedTrips: []
+  archivedTrips: [],
+  archiveFileValid: false,
+  commuteConfig: null
 };
 
 ui.fileA.addEventListener('change', () => handleFileLoad(0, [...(ui.fileA.files ?? [])]));
@@ -82,6 +93,7 @@ ui.timeline.addEventListener('input', () => {
   renderAtTime(state.currentSec);
 });
 ui.archiveForm.addEventListener('submit', saveTripToArchive);
+ui.archiveFile.addEventListener('change', previewArchiveFile);
 ui.refreshArchiveBtn.addEventListener('click', loadTripArchive);
 ui.leaderboardBody.addEventListener('click', onLeaderboardClick);
 map.on('click', onMapClick);
@@ -286,12 +298,19 @@ function parseGpx(xmlText) { /* unchanged */
   const xml = new DOMParser().parseFromString(xmlText, 'application/xml');
   const parserError = xml.querySelector('parsererror');
   if (parserError) throw new Error('Invalid XML/GPX.');
-  return [...xml.querySelectorAll('trkpt')].map((pt) => ({
+  if (xml.documentElement?.localName !== 'gpx') throw new Error('The selected XML file is not a GPX document.');
+  const rawPoints = [...xml.getElementsByTagNameNS('*', 'trkpt')];
+  if (rawPoints.length < 2) throw new Error('The GPX file must contain at least two track points.');
+  const points = rawPoints.map((pt) => ({
     lat: Number(pt.getAttribute('lat')),
     lon: Number(pt.getAttribute('lon')),
-    ele: Number(pt.querySelector('ele')?.textContent ?? 0),
-    time: pt.querySelector('time')?.textContent ? new Date(pt.querySelector('time').textContent).getTime() : NaN
-  })).filter((p) => Number.isFinite(p.lat) && Number.isFinite(p.lon));
+    ele: Number(pt.getElementsByTagNameNS('*', 'ele')[0]?.textContent ?? 0),
+    time: pt.getElementsByTagNameNS('*', 'time')[0]?.textContent ? Date.parse(pt.getElementsByTagNameNS('*', 'time')[0].textContent) : NaN
+  }));
+  if (points.some((point) => !Number.isFinite(point.lat) || !Number.isFinite(point.lon) || point.lat < -90 || point.lat > 90 || point.lon < -180 || point.lon > 180)) {
+    throw new Error('The GPX file contains invalid latitude or longitude values.');
+  }
+  return points;
 }
 
 function drawRouteSample(route, sample) {
@@ -528,6 +547,7 @@ async function loadTripArchive() {
     if (!statusResponse.ok) throw new Error('The archive API is unavailable. Run the app with `npm run dev` for local API support.');
     const status = await statusResponse.json();
     state.archiveConfigured = Boolean(status.configured);
+    state.commuteConfig = status.commute || null;
     setArchiveFormEnabled(state.archiveConfigured);
     if (!state.archiveConfigured) {
       state.archivedTrips = [];
@@ -554,6 +574,7 @@ async function saveTripToArchive(event) {
   event.preventDefault();
   const file = ui.archiveFile.files?.[0];
   if (!file) return setArchiveStatus('Choose a GPX file first.', 'error');
+  if (!state.archiveFileValid) return setArchiveStatus('Choose a valid GPX file before saving.', 'error');
   ui.saveTripBtn.disabled = true;
   setArchiveStatus(`Saving ${file.name}…`);
   try {
@@ -571,13 +592,126 @@ async function saveTripToArchive(event) {
     });
     await readApiResponse(response);
     ui.archiveForm.reset();
+    clearArchiveFilePreview();
     setArchiveStatus(`${file.name} was saved successfully.`, 'success');
     await loadTripArchive();
   } catch (error) {
     setArchiveStatus(error.message, 'error');
   } finally {
-    ui.saveTripBtn.disabled = !state.archiveConfigured;
+    ui.saveTripBtn.disabled = !state.archiveConfigured || !state.archiveFileValid;
   }
+}
+
+async function previewArchiveFile() {
+  const file = ui.archiveFile.files?.[0];
+  state.archiveFileValid = false;
+  ui.saveTripBtn.disabled = true;
+  if (!file) return clearArchiveFilePreview();
+
+  renderArchiveFilePreview({file, message: 'Reading and validating ride…'});
+  try {
+    if (file.size === 0) throw new Error('The selected file is empty.');
+    if (file.size > 4 * 1024 * 1024) throw new Error('The GPX file exceeds the 4 MB upload limit.');
+    if (!file.name.toLowerCase().endsWith('.gpx')) throw new Error('Choose a file with the .gpx extension.');
+    const points = parseGpx(await file.text());
+    const metrics = calculateGpxPreviewMetrics(points);
+    const directionSuggestion = suggestDirectionFromEndpoints(points);
+    if (directionSuggestion.value) ui.tripDirection.value = directionSuggestion.value;
+    state.archiveFileValid = true;
+    renderArchiveFilePreview({
+      file,
+      date: formatTripDate(metrics.recordedAt),
+      duration: formatDuration(metrics.elapsedTimeS),
+      distance: formatDistance(metrics.distanceM),
+      points: points.length.toLocaleString(),
+      direction: directionSuggestion.label,
+      message: directionSuggestion.message
+    });
+  } catch (error) {
+    renderArchiveFilePreview({file, message: error.message, error: true});
+  } finally {
+    ui.saveTripBtn.disabled = !state.archiveConfigured || !state.archiveFileValid;
+  }
+}
+
+function suggestDirectionFromEndpoints(points) {
+  if (!state.commuteConfig) {
+    return {
+      value: null,
+      label: 'Manual selection',
+      message: 'GPX validated. Configure home and work endpoints to enable automatic direction suggestions.'
+    };
+  }
+
+  const {home, work, endpointRadiusM} = state.commuteConfig;
+  const start = points[0];
+  const finish = points.at(-1);
+  const distances = {
+    startHome: haversineM(start, home),
+    startWork: haversineM(start, work),
+    finishHome: haversineM(finish, home),
+    finishWork: haversineM(finish, work)
+  };
+
+  if (distances.startHome <= endpointRadiusM && distances.finishWork <= endpointRadiusM) {
+    return directionResult('home_to_work', 'Home → Work', distances.startHome, distances.finishWork, 'home', 'work');
+  }
+  if (distances.startWork <= endpointRadiusM && distances.finishHome <= endpointRadiusM) {
+    return directionResult('work_to_home', 'Work → Home', distances.startWork, distances.finishHome, 'work', 'home');
+  }
+  return {
+    value: null,
+    label: 'Manual selection',
+    message: `GPX validated. The start and finish do not both fall within ${formatDistance(endpointRadiusM)} of the configured endpoints, so direction was not changed.`
+  };
+}
+
+function directionResult(value, label, startDistanceM, finishDistanceM, startName, finishName) {
+  return {
+    value,
+    label: `${label} (suggested)`,
+    message: `GPX validated. Suggested ${label}: start is ${formatDistance(startDistanceM)} from ${startName} and finish is ${formatDistance(finishDistanceM)} from ${finishName}.`
+  };
+}
+
+function calculateGpxPreviewMetrics(points) {
+  if (points.some((point) => !Number.isFinite(point.time))) {
+    throw new Error('Every track point must have a valid timestamp.');
+  }
+  let distanceM = 0;
+  for (let index = 1; index < points.length; index += 1) {
+    if (points[index].time <= points[index - 1].time) {
+      throw new Error('Track-point timestamps must increase throughout the ride.');
+    }
+    distanceM += haversineM(points[index - 1], points[index]);
+  }
+  const elapsedTimeS = (points.at(-1).time - points[0].time) / 1000;
+  if (elapsedTimeS <= 0) throw new Error('The timestamps do not describe a positive ride duration.');
+  return {recordedAt: new Date(points[0].time).toISOString(), elapsedTimeS, distanceM};
+}
+
+function renderArchiveFilePreview({file, date = '—', duration = '—', distance = '—', points = '—', direction = '—', message = '', error = false}) {
+  ui.archiveFileSummary.hidden = false;
+  ui.archiveFileSummary.classList.toggle('is-error', error);
+  ui.archiveSummaryName.textContent = file.name;
+  ui.archiveSummarySize.textContent = formatFileSize(file.size);
+  ui.archiveSummaryDate.textContent = date;
+  ui.archiveSummaryDuration.textContent = duration;
+  ui.archiveSummaryDistance.textContent = distance;
+  ui.archiveSummaryPoints.textContent = points;
+  ui.archiveSummaryDirection.textContent = direction;
+  ui.archiveSummaryMessage.textContent = message;
+}
+
+function clearArchiveFilePreview() {
+  state.archiveFileValid = false;
+  ui.archiveFileSummary.hidden = true;
+  ui.archiveFileSummary.classList.remove('is-error');
+  ui.saveTripBtn.disabled = !state.archiveConfigured;
+}
+
+function formatFileSize(bytes) {
+  return bytes >= 1024 * 1024 ? `${(bytes / (1024 * 1024)).toFixed(1)} MB` : `${Math.max(1, Math.round(bytes / 1024))} KB`;
 }
 
 function renderLeaderboard() {
@@ -625,6 +759,7 @@ async function onLeaderboardClick(event) {
 
 function setArchiveFormEnabled(enabled) {
   for (const element of ui.archiveForm.elements) element.disabled = !enabled;
+  ui.saveTripBtn.disabled = !enabled || !state.archiveFileValid;
 }
 
 function setArchiveStatus(message, type = '') {

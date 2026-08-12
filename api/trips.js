@@ -47,6 +47,11 @@ async function createTrip(request, response) {
   }
 
   const originalFilename = safeFileName(decodeHeader(request.headers['x-gpx-filename'], 'trip.gpx'));
+  if (!decodeHeader(request.headers['x-gpx-filename'], '').toLowerCase().endsWith('.gpx')) {
+    const error = new Error('The uploaded file must use the .gpx extension.');
+    error.statusCode = 400;
+    throw error;
+  }
   const direction = normalizeDirection(decodeHeader(request.headers['x-trip-direction'], 'other'));
   const routeName = cleanOptional(decodeHeader(request.headers['x-route-name']), 100);
   const bikeSetup = cleanOptional(decodeHeader(request.headers['x-bike-setup']), 100);

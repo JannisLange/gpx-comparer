@@ -90,6 +90,20 @@
           <span>GPX file</span>
           <input id="archiveFile" type="file" accept=".gpx,application/gpx+xml,application/xml,text/xml" required />
         </label>
+        <div id="archiveFileSummary" class="archive-file-summary" aria-live="polite" hidden>
+          <div class="archive-file-summary-heading">
+            <strong id="archiveSummaryName">Selected ride</strong>
+            <span id="archiveSummarySize"></span>
+          </div>
+          <dl>
+            <div><dt>Date</dt><dd id="archiveSummaryDate">—</dd></div>
+            <div><dt>Duration</dt><dd id="archiveSummaryDuration">—</dd></div>
+            <div><dt>Distance</dt><dd id="archiveSummaryDistance">—</dd></div>
+            <div><dt>GPS points</dt><dd id="archiveSummaryPoints">—</dd></div>
+            <div><dt>Direction</dt><dd id="archiveSummaryDirection">—</dd></div>
+          </dl>
+          <p id="archiveSummaryMessage"></p>
+        </div>
         <label>
           <span>Direction</span>
           <select id="tripDirection">
