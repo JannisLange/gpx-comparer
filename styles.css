@@ -561,6 +561,28 @@ input:disabled {
   gap: 0.3rem;
 }
 
+.edit-actions {
+  display: inline-flex;
+  gap: 0.3rem;
+}
+
+.plain-button {
+  border-color: #cbd5cf;
+  background: #fff;
+  color: var(--muted);
+}
+
+.table-edit-input {
+  width: 10rem;
+  min-width: 7rem;
+  padding: 0.3rem 0.4rem;
+  font-size: 0.8rem;
+}
+
+.editable-table-cell {
+  min-width: 8rem;
+}
+
 .compare-button {
   padding: 0.2rem 0.45rem;
   font-size: 0.78rem;

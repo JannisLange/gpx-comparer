@@ -72,7 +72,8 @@ const state = {
   archiveConfigured: false,
   archivedTrips: [],
   archiveFileValid: false,
-  commuteConfig: null
+  commuteConfig: null,
+  editingTripId: null
 };
 
 ui.fileA.addEventListener('change', () => handleFileLoad(0, [...(ui.fileA.files ?? [])]));
@@ -716,30 +717,65 @@ function formatFileSize(bytes) {
 
 function renderLeaderboard() {
   if (!state.archivedTrips.length) {
-    ui.leaderboardBody.innerHTML = '<tr><td colspan="9" class="empty-table">No saved trips yet.</td></tr>';
+    ui.leaderboardBody.innerHTML = '<tr><td colspan="11" class="empty-table">No saved trips yet.</td></tr>';
     return;
   }
-  ui.leaderboardBody.innerHTML = state.archivedTrips.map((trip) => `
+  ui.leaderboardBody.innerHTML = state.archivedTrips.map((trip) => renderLeaderboardRow(trip)).join('');
+}
+
+function renderLeaderboardRow(trip) {
+  const isEditing = state.editingTripId === trip.id;
+  const routeCell = isEditing
+    ? `<input class="table-edit-input" data-edit-field="routeName" maxlength="100" aria-label="Route name" value="${escapeHtml(trip.route_name || '')}">`
+    : escapeHtml(trip.route_name || '—');
+  const bikeCell = isEditing
+    ? `<input class="table-edit-input" data-edit-field="bikeSetup" maxlength="100" aria-label="Bike setup" value="${escapeHtml(trip.bike_setup || '')}">`
+    : escapeHtml(trip.bike_setup || '—');
+  const editActions = isEditing
+    ? `<span class="edit-actions">
+        <button type="button" class="compare-button" data-save-trip-id="${trip.id}">Save</button>
+        <button type="button" class="plain-button" data-cancel-trip-id="${trip.id}">Cancel</button>
+      </span>`
+    : `<button type="button" class="compare-button" data-edit-trip-id="${trip.id}">Edit details</button>`;
+  return `
     <tr>
       <td title="${escapeHtml(trip.original_filename)}">${formatTripDate(trip.recorded_at)}</td>
       <td>${formatDirection(trip.direction)}</td>
+      <td class="editable-table-cell">${routeCell}</td>
       <td>${formatDistance(trip.distance_m)}</td>
       <td>${formatDuration(trip.elapsed_time_s)}</td>
       <td>${formatDuration(trip.moving_time_s)}</td>
       <td>${formatDuration(trip.stopped_time_s)}</td>
       <td>${(Number(trip.average_speed_mps) * 3.6).toFixed(1)} km/h</td>
-      <td>${escapeHtml(trip.bike_setup || '—')}</td>
+      <td class="editable-table-cell">${bikeCell}</td>
       <td><span class="compare-actions">
-        <button type="button" class="compare-button" data-trip-id="${trip.id}" data-route="0">Route A</button>
-        <button type="button" class="compare-button" data-trip-id="${trip.id}" data-route="1">Route B</button>
+        <button type="button" class="compare-button" data-compare-trip-id="${trip.id}" data-route="0">Route A</button>
+        <button type="button" class="compare-button" data-compare-trip-id="${trip.id}" data-route="1">Route B</button>
       </span></td>
-    </tr>`).join('');
+      <td>${editActions}</td>
+    </tr>`;
 }
 
 async function onLeaderboardClick(event) {
-  const button = event.target.closest('[data-trip-id]');
+  const editButton = event.target.closest('[data-edit-trip-id]');
+  if (editButton) {
+    state.editingTripId = editButton.dataset.editTripId;
+    renderLeaderboard();
+    ui.leaderboardBody.querySelector('[data-edit-field="routeName"]')?.focus();
+    return;
+  }
+  const cancelButton = event.target.closest('[data-cancel-trip-id]');
+  if (cancelButton) {
+    state.editingTripId = null;
+    renderLeaderboard();
+    return;
+  }
+  const saveButton = event.target.closest('[data-save-trip-id]');
+  if (saveButton) return saveTripDetails(saveButton);
+
+  const button = event.target.closest('[data-compare-trip-id]');
   if (!button) return;
-  const trip = state.archivedTrips.find((item) => item.id === button.dataset.tripId);
+  const trip = state.archivedTrips.find((item) => item.id === button.dataset.compareTripId);
   if (!trip) return;
   button.disabled = true;
   setArchiveStatus(`Loading ${trip.original_filename} into Route ${button.dataset.route === '0' ? 'A' : 'B'}…`);
@@ -754,6 +790,30 @@ async function onLeaderboardClick(event) {
     setArchiveStatus(error.message, 'error');
   } finally {
     button.disabled = false;
+  }
+}
+
+async function saveTripDetails(button) {
+  const tripId = button.dataset.saveTripId;
+  const row = button.closest('tr');
+  const routeName = row.querySelector('[data-edit-field="routeName"]').value;
+  const bikeSetup = row.querySelector('[data-edit-field="bikeSetup"]').value;
+  for (const control of row.querySelectorAll('button, input')) control.disabled = true;
+  setArchiveStatus('Saving trip details…');
+  try {
+    const response = await fetch(`/api/trips?id=${encodeURIComponent(tripId)}`, {
+      method: 'PATCH',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({routeName, bikeSetup})
+    });
+    const payload = await readApiResponse(response);
+    state.archivedTrips = state.archivedTrips.map((trip) => trip.id === tripId ? payload.trip : trip);
+    state.editingTripId = null;
+    renderLeaderboard();
+    setArchiveStatus('Route and bike setup updated.', 'success');
+  } catch (error) {
+    setArchiveStatus(error.message, 'error');
+    for (const control of row.querySelectorAll('button, input')) control.disabled = false;
   }
 }
 

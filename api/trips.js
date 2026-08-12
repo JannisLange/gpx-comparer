@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { processGpx } from '../lib/gpx.js';
 import { decodeHeader, handleApiError, readBody, safeFileName, sendJson } from '../lib/http.js';
 import { getSupabaseAdmin, storageBucket } from '../lib/supabase-admin.js';
+import { normalizeTripDetails, validateTripId } from '../lib/trip-details.js';
 
 export const config = {api: {bodyParser: false}};
 
@@ -11,11 +12,51 @@ export default async function handler(request, response) {
   try {
     if (request.method === 'GET') return await listTrips(request, response);
     if (request.method === 'POST') return await createTrip(request, response);
-    response.setHeader('Allow', 'GET, POST');
+    if (request.method === 'PATCH') return await updateTrip(request, response);
+    response.setHeader('Allow', 'GET, POST, PATCH');
     return sendJson(response, 405, {error: 'Method not allowed.'});
   } catch (error) {
     return handleApiError(response, error);
   }
+}
+
+async function updateTrip(request, response) {
+  const tripId = new URL(request.url, 'http://localhost').searchParams.get('id');
+  if (!validateTripId(tripId)) {
+    const error = new Error('A valid trip id is required.');
+    error.statusCode = 400;
+    throw error;
+  }
+
+  const contentType = String(request.headers['content-type'] || '');
+  if (!contentType.includes('application/json')) {
+    const error = new Error('Trip updates must use application/json.');
+    error.statusCode = 415;
+    throw error;
+  }
+
+  let submitted;
+  try {
+    submitted = JSON.parse((await readBody(request)).toString('utf8'));
+  } catch {
+    const error = new Error('The trip update is not valid JSON.');
+    error.statusCode = 400;
+    throw error;
+  }
+  const updates = normalizeTripDetails(submitted);
+  const supabase = getSupabaseAdmin();
+  const {data, error} = await supabase
+    .from('trips')
+    .update(updates)
+    .eq('id', tripId)
+    .select(selectedFields)
+    .single();
+  if (error) {
+    const updateError = new Error(error.code === 'PGRST116' ? 'Trip not found.' : `Could not update trip: ${error.message}`);
+    updateError.statusCode = error.code === 'PGRST116' ? 404 : 500;
+    throw updateError;
+  }
+  return sendJson(response, 200, {trip: data});
 }
 
 async function listTrips(request, response) {
